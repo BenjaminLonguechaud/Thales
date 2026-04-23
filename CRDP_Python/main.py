@@ -38,13 +38,10 @@ class CRDPApplication:
         self.crdp_client = CRDPClient(config)
 
         # Default policies (will be updated from API)
-        self.available_policies = [
-            config.get("crdp.default_policy", "default")
-        ]
+        self.available_policies = self.crdp_client.load_policies()
 
         # Set up the GUI
         self._setup_ui()
-        self._load_policies()
 
     def _setup_ui(self):
         """Set up the user interface."""
@@ -191,16 +188,6 @@ class CRDPApplication:
 
         # Initial status update
         self._update_status()
-
-    def _load_policies(self):
-        """Load available policies from configuration."""
-        # Policies are loaded from config, update comboboxes
-        self.protect_policy_combo['values'] = self.available_policies
-        self.reveal_policy_combo['values'] = self.available_policies
-        if self.available_policies:
-            self.protect_policy_combo.set(self.available_policies[0])
-            self.reveal_policy_combo.set(self.available_policies[0])
-            logger.info(f"Policies loaded from config: {self.available_policies}")
 
     def _on_protect_click(self):
         """Handle protect button click."""

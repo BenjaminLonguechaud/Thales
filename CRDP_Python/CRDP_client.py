@@ -17,10 +17,51 @@ class CRDPClient:
         self.crdp_url = config.get("crdp.url", "http://localhost:32085").rstrip('/')
         self.timeout = config.get("crdp.timeout", 10)
         self.ssl_verify = config.get("crdp.ssl_verify", False)
+        self.ciphertrust_url = config.get("ciphertrust.url", "http://localhost")
+        self.username = config.get("ciphertrust.username", "admin")
+        self.password = config.get("ciphertrust.password", "password")
 
         self.session = requests.Session()
         self.session.verify = self.ssl_verify
         self.session.headers.update({'Content-Type': 'application/json'})
+
+    def load_policies(self):
+        """
+        Fetches the list of protection policies from the API.
+
+        Returns:
+            list: A list of protection policies if successful
+        """
+
+        # Authenticate to get the JWT token
+        token_url = urljoin(self.ciphertrust_url, '/api/v1/auth/tokens')
+        policies_url = urljoin(self.ciphertrust_url, '/api/v1/data-protection/protection-policies')
+
+        auth_payload = {
+            "name": self.username,
+            "password": self.password
+        }
+
+        try:
+            auth_response = requests.post(token_url, json=auth_payload, verify=False)
+            auth_response.raise_for_status()
+            jwt_token = auth_response.json().get("jwt")
+
+            headers = {
+                "Authorization": f"Bearer {jwt_token}",
+            }
+
+            logger.info(f"Loading protection policies")
+            policies_response = self.session.get(policies_url, headers=headers, timeout=self.timeout)
+            policies_response.raise_for_status()
+            result = [resource["name"] for resource in policies_response.json().get("resources", [])]
+            # Remove duplicates by converting to a set, then back to a list
+            unique_names = list(set(result))
+            return unique_names
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API Error while loading policies: {str(e)}")
+            raise Exception(f"Failed to load protection policies: {str(e)}")
 
     def protect(self, data: str, protection_policy_name: str) -> Optional[Dict[str, Any]]:
         """Protect data using CRDP.
