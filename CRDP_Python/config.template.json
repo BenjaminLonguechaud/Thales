@@ -1,0 +1,24 @@
+{
+  "crdp": {
+    "url": "http://192.168.0.2:32085",
+    "timeout": 10,
+    "ssl_verify": false
+  },
+  "ciphertrust": {
+    "url": "https://192.168.0.3",
+    "username": "admin",
+    "password": "password"
+  },
+  "ui": {
+    "window_width": 500,
+    "window_height": 400,
+    "theme": "default",
+    "font_size": 10
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "crdp_app.log",
+    "max_size": 10485760,
+    "backup_count": 5
+  }
+}
