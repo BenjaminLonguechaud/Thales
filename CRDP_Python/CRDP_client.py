@@ -92,8 +92,8 @@ class CRDPClient:
             logger.error(f"API Error during protect: {str(e)}")
             raise Exception(f"Failed to protect data: {str(e)}")
 
-    def unprotect(self, protected_data: str, protection_policy_name: str, username: str, external_version: str = "1001002") -> Optional[Dict[str, Any]]:
-        """Reveal/unprotect data using CRDP.
+    def reveal(self, protected_data: str, protection_policy_name: str, username: str, external_version: str = "1001002") -> Optional[Dict[str, Any]]:
+        """Reveal/reveal data using CRDP.
 
         Args:
             protected_data: Protected data to reveal
