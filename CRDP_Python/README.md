@@ -1,4 +1,4 @@
-# CRDP Data Protection Manager
+# Thales Data Protection with CRDP
 
 A user-friendly GUI application for protecting and revealing sensitive data using CipherTrust CRDP (CipherTrust RESTful Data Protection).
 
@@ -109,8 +109,7 @@ Using this file keeps sensitive information separate from the source code.
 
 ### Dynamic Configuration
 
-If `config.json` is not found, the application uses sensible defaults with localhost:
-
+If `config.json` is not found, the application uses localhost:
 ```python
 CRDPClient will default to: http://localhost:32085
 ```
