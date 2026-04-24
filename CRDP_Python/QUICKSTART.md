@@ -12,14 +12,14 @@ Create `config.json` with your environment details. Start from config.template.j
 ```json
 {
   "crdp": {
-    "url": "http://your-crdp-host:32085",      // CRDP API endpoint
+    "url": "http://crdp-ip:32085",             // CRDP API endpoint
     "timeout": 10,                             // Request timeout (seconds)
     "ssl_verify": false,                       // SSL verification
   },
   "ciphertrust": {
-    "url": "http://cm-manager",                // CipherTrust Manager
-    "username": "admin",                       // CipherTrust admin username
-    "password": "password"                     // CipherTrust admin passwrd
+    "url": "http://ciphertrust-ip",            // CipherTrust Manager
+    "username": "ciphertrust-username",        // CipherTrust admin username
+    "password": "ciphertrust-password"         // CipherTrust admin passwrd
   },
   "ui": {
     "window_width": 800,                       // Application window width

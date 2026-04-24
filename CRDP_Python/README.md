@@ -52,6 +52,17 @@ python main.py
 4. The decrypted data will appear in the result area
 5. Use "Copy Revealed Data" to copy it to clipboard
 
+#### Performance & Liveness Tab
+##### Service Liveness Check:
+- Verify the operational status of the CRDP service using the /liveness endpoint.
+- Displays a simple "Alive" or "Unreachable" status to confirm if the service is running.
+- Useful for troubleshooting connection issues or validating service availability.
+
+##### Performance Metrics:
+- /metrics endpoint enables administrators to generate performance metrics.
+- Metrics are presented in a readable format, with options to refresh manually.
+- Helps administrators monitor system health, identify bottlenecks, and optimize performance.
+
 #### Status & Info Tab
 - View connection status to CRDP service
 - View available protection policies
@@ -82,6 +93,12 @@ The application integrates with CRDP API endpoints:
     "user_name": "username"
   }
   ```
+
+### Liveness Endpoint:
+- **URL**: `GET /liveness`
+
+### Metrics Endpoint:
+- **URL**: `GET /metrics`
 
 ## Architecture
 
