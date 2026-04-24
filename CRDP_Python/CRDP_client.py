@@ -117,10 +117,73 @@ class CRDPClient:
             response = self.session.post(url, json=payload, timeout=self.timeout)
             response.raise_for_status()
 
-            result = response.json()
+            result = response.json().get("data", "")
             logger.info("Data revealed successfully")
             return result
 
         except requests.exceptions.RequestException as e:
             logger.error(f"API Error during reveal: {str(e)}")
             raise Exception(f"Failed to reveal data: {str(e)}")
+
+    def healthz(self) -> Optional[Dict[str, Any]]:
+        """Check health status of CRDP service.
+
+        Returns:
+            Health status response or None on failure
+        """
+        try:
+            url = urljoin(self.crdp_url, '/healthz')
+
+            logger.info("Calling healthz API")
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info("Health check successful")
+            return result
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API Error during health check: {str(e)}")
+            raise Exception(f"Health check failed: {str(e)}")
+
+    def liveness(self) -> Optional[Dict[str, Any]]:
+        """Check liveness status of CRDP service.
+
+        Returns:
+            Liveness status response or None on failure
+        """
+        try:
+            url = urljoin(self.crdp_url, '/liveness')
+
+            logger.info("Calling liveness API")
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+
+            result = response.json().get("status", "Unknown")
+            logger.info("Liveness check successful")
+            return result
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API Error during liveness check: {str(e)}")
+            raise Exception(f"Liveness check failed: {str(e)}")
+
+    def metrics(self) -> Optional[str]:
+        """Get performance metrics from CRDP service.
+
+        Returns:
+            Performance metrics as text or None on failure
+        """
+        try:
+            url = urljoin(self.crdp_url, '/metrics')
+
+            logger.info("Calling metrics API")
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+
+            result = response.text
+            logger.info("Metrics retrieved successfully")
+            return result
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API Error during metrics retrieval: {str(e)}")
+            raise Exception(f"Failed to retrieve metrics: {str(e)}")
