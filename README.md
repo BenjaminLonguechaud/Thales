@@ -19,6 +19,9 @@ A Python-based GUI application for managing tokenization and detokenization of s
 ### 5. extract_keys
 A simple Python script for extracting keys from Thales CipherTrust. Easily customizable for different input/output behaviors. See the subproject's README for usage instructions.
 
+### 6. Database/Postgres
+A simple Python application to connect to and interact with a PostgreSQL database deployed in a Kubernetes cluster.
+
 ---
 
 For more details on each sub-project, refer to their respective README files.
