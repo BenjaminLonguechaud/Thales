@@ -1,0 +1,15 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "postgresdb",
+    "user": "admin",
+    "password": "admin",
+    "min_connections": 2,
+    "max_connections": 10
+  },
+  "application": {
+    "debug": true,
+    "log_level": "INFO"
+  }
+}
