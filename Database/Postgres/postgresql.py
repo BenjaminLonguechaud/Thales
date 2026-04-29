@@ -178,30 +178,6 @@ class PostgreSQLDatabase:
             logger.error(f"Error inserting record: {e}")
             return False
 
-    def insert_records(self, table_name: str, records: List[Dict[str, Any]]) -> int:
-        """
-        Insert multiple records into the table.
-
-        Args:
-            table_name: Name of the table
-            records: List of dictionaries to insert
-
-        Returns:
-            Number of records inserted
-        """
-        if not records:
-            return 0
-
-        try:
-            count = 0
-            for record in records:
-                if self.insert_record(table_name, record):
-                    count += 1
-            return count
-        except Error as e:
-            logger.error(f"Error inserting records: {e}")
-            return 0
-
     def select_all(self, table_name: str) -> List[Dict[str, Any]]:
         """
         Select all records from a table.
@@ -214,44 +190,6 @@ class PostgreSQLDatabase:
         """
         query = f"SELECT * FROM {table_name}"
         return self.execute_query(query)
-
-    def select_by_condition(
-        self, table_name: str, condition: str, params: tuple = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Select records matching a condition.
-
-        Args:
-            table_name: Name of the table
-            condition: WHERE clause condition (e.g., "id = %s")
-            params: Parameters for the condition
-
-        Returns:
-            List of dictionaries matching the condition
-        """
-        query = f"SELECT * FROM {table_name} WHERE {condition}"
-        return self.execute_query(query, params)
-
-    def update_record(
-        self, table_name: str, updates: Dict[str, Any], condition: str, params: tuple = None
-    ) -> int:
-        """
-        Update records matching a condition.
-
-        Args:
-            table_name: Name of the table
-            updates: Dictionary of column names and new values
-            condition: WHERE clause condition
-            params: Parameters for the condition
-
-        Returns:
-            Number of rows updated
-        """
-        set_clause = ", ".join([f"{col} = %s" for col in updates.keys()])
-        query = f"UPDATE {table_name} SET {set_clause} WHERE {condition}"
-
-        all_params = tuple(updates.values()) + (params or ())
-        return self.execute_update(query, all_params)
 
     def delete_records(self, table_name: str, condition: str, params: tuple = None) -> int:
         """
@@ -289,19 +227,6 @@ class PostgreSQLDatabase:
             logger.error(f"Error dropping table: {e}")
             return False
 
-    def execute_raw_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
-        """
-        Execute a raw SQL query with full control.
-
-        Args:
-            query: Raw SQL query string
-            params: Query parameters (optional)
-
-        Returns:
-            Query results as list of dictionaries
-        """
-        return self.execute_query(query, params)
-
     def get_table_info(self, table_name: str) -> List[Dict[str, Any]]:
         """
         Get information about table columns.
@@ -320,28 +245,21 @@ class PostgreSQLDatabase:
         """
         return self.execute_query(query, (table_name,))
 
+    def get_all_tables(self) -> List[str]:
+        """
+        Get a list of all tables in the database.
 
-def get_database_from_env() -> PostgreSQLDatabase:
-    """
-    Create a database connection using environment variables.
-
-    Expected environment variables:
-    - DB_HOST: PostgreSQL host
-    - DB_PORT: PostgreSQL port (default: 5432)
-    - DB_NAME: Database name (default: postgres)
-    - DB_USER: Database user (default: postgres)
-    - DB_PASSWORD: Database password (default: postgres)
-
-    Returns:
-        PostgreSQLDatabase instance
-    """
-    return PostgreSQLDatabase(
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", 5432)),
-        database=os.getenv("DB_NAME", "postgres"),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", "postgres"),
-    )
+        Returns:
+            List of table names
+        """
+        query = """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """
+        results = self.execute_query(query)
+        return [row['table_name'] for row in results]
 
 
 if __name__ == "__main__":

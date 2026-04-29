@@ -5,13 +5,12 @@ Features: Add/List/Remove entries in a tab, and a logs tab for monitoring operat
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, filedialog
 from tkinter import scrolledtext
 import threading
 import logging
-from datetime import datetime
-from typing import List, Dict, Any
 import json
+import re
 
 from config import DB_CONFIG
 from postgresql import PostgreSQLDatabase
@@ -47,12 +46,14 @@ class PostgreSQLGUI:
         """Initialize the GUI application."""
         self.root = root
         self.root.title("PostgreSQL Database Manager")
-        self.root.geometry("900x700")
+        self.root.geometry("900x750")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.db = None
         self.current_table = "users"
         self.table_schema = None
+        self.next_table_number = 1  # Track next UsersX number
+        self.status_message = ""  # Store status message
 
         # Create the UI
         self.create_widgets()
@@ -81,19 +82,18 @@ class PostgreSQLGUI:
 
         ttk.Label(top_frame, text="Table:", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
 
-        self.table_var = tk.StringVar(value="users")
+        self.table_var = tk.StringVar()
         self.table_combo = ttk.Combobox(
             top_frame, textvariable=self.table_var,
-            values=["users", "products", "orders", "custom"],
-            width=15, state="readonly"
+            values=[], width=15, state="readonly"
         )
         self.table_combo.pack(side=tk.LEFT, padx=5)
         self.table_combo.bind("<<ComboboxSelected>>", self.on_table_change)
 
         # Buttons
         ttk.Button(top_frame, text="Refresh", command=self.load_table_data).pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="Create Table", command=self.create_table_dialog).pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="Drop Table", command=self.drop_table_dialog).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="Create Table", command=self.create_new_users_table).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="Drop Table", command=self.drop_current_table).pack(side=tk.LEFT, padx=5)
 
         # Connection status
         self.status_label = ttk.Label(top_frame, text="Disconnected", foreground="red")
@@ -116,15 +116,29 @@ class PostgreSQLGUI:
 
         self.create_table_view(right_frame)
 
+        # Status message bar at the bottom
+        status_bar_frame = ttk.Frame(self.data_frame)
+        status_bar_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.status_message_label = ttk.Label(
+            status_bar_frame,
+            text="",
+            foreground="blue",
+            font=("Arial", 9),
+            wraplength=700
+        )
+        self.status_message_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
     def create_form_fields(self, parent):
         """Create dynamic form fields."""
         # Frame to hold form fields
         self.form_container = ttk.Frame(parent)
         self.form_container.pack(fill=tk.BOTH, expand=True)
 
-        # Add default fields
+        # Add default fields: Name, Email, SSN
         self.add_form_field("name", "Name", "text")
         self.add_form_field("email", "Email", "text")
+        self.add_form_field("ssn", "SSN", "text")
 
         # Buttons frame
         button_frame = ttk.Frame(parent)
@@ -173,7 +187,7 @@ class PostgreSQLGUI:
         # Treeview
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("id", "name", "email"),
+            columns=("id", "name", "email", "ssn"),
             height=15,
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set
@@ -185,14 +199,16 @@ class PostgreSQLGUI:
         # Define columns
         self.tree.column("#0", width=0, stretch=tk.NO)
         self.tree.column("id", anchor=tk.W, width=50)
-        self.tree.column("name", anchor=tk.W, width=150)
-        self.tree.column("email", anchor=tk.W, width=200)
+        self.tree.column("name", anchor=tk.W, width=120)
+        self.tree.column("email", anchor=tk.W, width=150)
+        self.tree.column("ssn", anchor=tk.W, width=120)
 
         # Create headings
         self.tree.heading("#0", text="")
         self.tree.heading("id", text="ID")
         self.tree.heading("name", text="Name")
         self.tree.heading("email", text="Email")
+        self.tree.heading("ssn", text="SSN")
 
         # Grid layout
         self.tree.grid(row=0, column=0, sticky='nsew')
@@ -246,11 +262,11 @@ class PostgreSQLGUI:
                 self.db = PostgreSQLDatabase(**DB_CONFIG)
                 self.update_status("Connected", "green")
                 logger.info(f"✓ Successfully connected to PostgreSQL at {DB_CONFIG['host']}:{DB_CONFIG['port']}")
-                self.load_table_data()
+                self.root.after(0, self.refresh_available_tables)
             except Exception as e:
                 self.update_status("Connection Failed", "red")
                 logger.error(f"✗ Failed to connect: {str(e)}")
-                messagebox.showerror("Connection Error", f"Could not connect to database:\n{str(e)}")
+                self.show_status_message(f"Connection Error: {str(e)}")
 
         thread = threading.Thread(target=connect, daemon=True)
         thread.start()
@@ -259,13 +275,72 @@ class PostgreSQLGUI:
         """Update the connection status label."""
         self.root.after(0, lambda: self.status_label.config(text=status, foreground=color))
 
+    def show_status_message(self, message: str, duration=5000):
+        """Show a status message at the bottom of the window."""
+        self.status_message = message
+        self.root.after(0, lambda: self.status_message_label.config(text=message))
+        # Auto-clear message after duration (in milliseconds)
+        if duration > 0:
+            self.root.after(duration, lambda: self.root.after(0, lambda: self.status_message_label.config(text="")))
+
+    def refresh_available_tables(self, select_latest=False, select_first=False):
+        """Refresh the list of available UsersX tables in the dropdown."""
+        if not self.db:
+            return
+
+        def refresh():
+            try:
+                # Get list of all tables
+                tables = self.db.get_all_tables()
+
+                # Filter for UsersX pattern tables (case-insensitive, matches Users1, Users2, etc.)
+                users_tables = [t for t in tables if re.match(r'^Users\d+$', t, re.IGNORECASE)]
+
+                # Sort by number
+                def extract_number(table_name):
+                    match = re.search(r'\d+', table_name)
+                    return int(match.group()) if match else 0
+
+                users_tables.sort(key=extract_number)
+
+                # Update dropdown
+                if users_tables:
+                    self.root.after(0, lambda: self.table_combo.configure(values=users_tables))
+                    # Select table based on parameters
+                    if select_latest:
+                        # After table creation - select the newly created table (last one)
+                        self.root.after(0, lambda: self.table_combo.set(users_tables[-1]))
+                        self.root.after(0, self.load_table_data)
+                    elif select_first:
+                        # After table deletion - select the first available table
+                        self.root.after(0, lambda: self.table_combo.set(users_tables[0]))
+                        self.root.after(0, self.load_table_data)
+                    elif not self.table_var.get():
+                        # On initial connection - select first table if none selected
+                        self.root.after(0, lambda: self.table_combo.set(users_tables[0]))
+                        self.root.after(0, self.load_table_data)
+                    # Calculate next table number
+                    self.next_table_number = extract_number(users_tables[-1]) + 1
+                else:
+                    self.root.after(0, lambda: self.table_combo.configure(values=[]))
+                    self.root.after(0, lambda: self.table_var.set(""))
+                    self.next_table_number = 1
+
+            except Exception as e:
+                logger.error(f"Error refreshing tables: {str(e)}")
+
+        thread = threading.Thread(target=refresh, daemon=True)
+        thread.start()
+
     def load_table_data(self):
         """Load data from the selected table."""
         if not self.db:
-            messagebox.showwarning("Warning", "Not connected to database")
+            self.show_status_message("Not connected to database")
             return
 
         table_name = self.table_var.get()
+        if not table_name:
+            return
 
         def load():
             try:
@@ -273,6 +348,7 @@ class PostgreSQLGUI:
                 columns = self.db.get_table_info(table_name)
                 if not columns:
                     logger.warning(f"Table '{table_name}' does not exist")
+                    self.root.after(0, lambda: self.show_status_message(f"Table '{table_name}' not found"))
                     return
 
                 # Clear existing tree items
@@ -298,6 +374,7 @@ class PostgreSQLGUI:
                 logger.info(f"Loaded {len(records)} records from table '{table_name}'")
             except Exception as e:
                 logger.error(f"Error loading table data: {str(e)}")
+                self.root.after(0, lambda: self.show_status_message(f"Error loading table data: {str(e)}"))
 
         thread = threading.Thread(target=load, daemon=True)
         thread.start()
@@ -309,7 +386,7 @@ class PostgreSQLGUI:
     def add_record(self):
         """Add a new record to the table."""
         if not self.db:
-            messagebox.showwarning("Warning", "Not connected to database")
+            self.show_status_message("Not connected to database")
             return
 
         # Collect form data
@@ -320,25 +397,28 @@ class PostgreSQLGUI:
                 record[field_name] = value
 
         if not record:
-            messagebox.showwarning("Warning", "Please fill in at least one field")
+            self.show_status_message("Please fill in at least one field")
             return
 
         table_name = self.table_var.get()
+        if not table_name:
+            self.show_status_message("No table selected")
+            return
 
         def insert():
             try:
                 success = self.db.insert_record(table_name, record)
                 if success:
                     logger.info(f"✓ Inserted record into '{table_name}': {record}")
-                    self.root.after(0, lambda: messagebox.showinfo("Success", "Record added successfully"))
+                    self.root.after(0, lambda: self.show_status_message(f"Record added to {table_name} successfully"))
                     self.root.after(0, self.load_table_data)
                     self.root.after(0, self.clear_form)
                 else:
                     logger.error(f"✗ Failed to insert record into '{table_name}'")
-                    self.root.after(0, lambda: messagebox.showerror("Error", "Failed to insert record"))
+                    self.root.after(0, lambda: self.show_status_message(f"Failed to insert record into {table_name}"))
             except Exception as e:
                 logger.error(f"Error inserting record: {str(e)}")
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Error: {str(e)}"))
+                self.root.after(0, lambda: self.show_status_message(f"Error: {str(e)}"))
 
         thread = threading.Thread(target=insert, daemon=True)
         thread.start()
@@ -346,123 +426,144 @@ class PostgreSQLGUI:
     def delete_selected_record(self):
         """Delete the selected record from the table."""
         if not self.db:
-            messagebox.showwarning("Warning", "Not connected to database")
+            self.show_status_message("Not connected to database")
             return
 
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning("Warning", "Please select a record to delete")
+            self.show_status_message("Please select a record to delete")
             return
 
-        if messagebox.askyesno("Confirm", "Delete the selected record(s)?"):
-            table_name = self.table_var.get()
+        table_name = self.table_var.get()
+        if not table_name:
+            self.show_status_message("No table selected")
+            return
 
-            def delete():
-                try:
-                    deleted_count = 0
-                    for item in selected:
-                        values = self.tree.item(item, "values")
-                        if values:
-                            # Assume first column is ID
-                            record_id = values[0]
-                            deleted = self.db.delete_records(table_name, "id = %s", (record_id,))
-                            deleted_count += deleted
+        def delete():
+            try:
+                deleted_count = 0
+                for item in selected:
+                    values = self.tree.item(item, "values")
+                    if values:
+                        # Assume first column is ID
+                        record_id = values[0]
+                        deleted = self.db.delete_records(table_name, "id = %s", (record_id,))
+                        deleted_count += deleted
 
-                    logger.info(f"✓ Deleted {deleted_count} record(s) from '{table_name}'")
-                    self.root.after(0, self.load_table_data)
-                    self.root.after(0, lambda: messagebox.showinfo("Success", f"Deleted {deleted_count} record(s)"))
-                except Exception as e:
-                    logger.error(f"Error deleting record: {str(e)}")
-                    self.root.after(0, lambda: messagebox.showerror("Error", f"Error: {str(e)}"))
+                logger.info(f"✓ Deleted {deleted_count} record(s) from '{table_name}'")
+                self.root.after(0, lambda: self.show_status_message(f"Deleted {deleted_count} record(s) from {table_name}"))
+                self.root.after(0, self.load_table_data)
+            except Exception as e:
+                logger.error(f"Error deleting record: {str(e)}")
+                self.root.after(0, lambda: self.show_status_message(f"Error: {str(e)}"))
 
-            thread = threading.Thread(target=delete, daemon=True)
-            thread.start()
+        thread = threading.Thread(target=delete, daemon=True)
+        thread.start()
 
     def on_tree_double_click(self, event):
         """Handle double-click on tree item to edit."""
         item = self.tree.selection()
         if item:
-            messagebox.showinfo("Info", "Edit feature coming soon")
+            self.show_status_message("Edit feature coming soon")
 
     def clear_form(self):
         """Clear all form fields."""
         for widget in self.form_fields.values():
             widget.delete(0, tk.END)
 
-    def create_table_dialog(self):
-        """Show dialog to create a new table."""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Create Table")
-        dialog.geometry("400x300")
+    def create_new_users_table(self):
+        """Create a new UsersX table with the fixed schema (Name, Email, SSN)."""
+        if not self.db:
+            self.show_status_message("Not connected to database")
+            return
 
-        ttk.Label(dialog, text="Table Name:", font=("Arial", 10, "bold")).pack(pady=5)
-        table_name_entry = ttk.Entry(dialog, width=30)
-        table_name_entry.pack(pady=5)
+        # Use the next available table number
+        table_name = f"Users{self.next_table_number}"
 
-        ttk.Label(dialog, text="Columns (JSON format):", font=("Arial", 10, "bold")).pack(pady=5)
-        columns_text = tk.Text(dialog, height=10, width=45)
-        columns_text.pack(pady=5)
-        columns_text.insert("1.0", '{\n  "id": "SERIAL PRIMARY KEY",\n  "name": "VARCHAR(255)",\n  "email": "VARCHAR(255)"\n}')
+        # Define the fixed schema
+        schema = {
+            "id": "SERIAL PRIMARY KEY",
+            "name": "VARCHAR(255)",
+            "email": "VARCHAR(255)",
+            "ssn": "VARCHAR(11)"
+        }
 
         def create():
             try:
-                table_name = table_name_entry.get().strip()
-                if not table_name:
-                    messagebox.showwarning("Warning", "Please enter a table name")
-                    return
-
-                columns_json = columns_text.get("1.0", tk.END)
-                schema = json.loads(columns_json)
-
                 if self.db.create_table(table_name, schema):
-                    logger.info(f"✓ Created table '{table_name}'")
-                    messagebox.showinfo("Success", f"Table '{table_name}' created successfully")
-                    dialog.destroy()
-                    self.load_table_data()
-            except json.JSONDecodeError:
-                messagebox.showerror("Error", "Invalid JSON format")
+                    logger.info(f"✓ Created table '{table_name}' with columns: Name, Email, SSN")
+                    self.show_status_message(f"Table {table_name} created with columns: Name, Email, SSN")
+                    self.next_table_number += 1
+                    self.root.after(0, lambda: self.refresh_available_tables(select_latest=True))
+                else:
+                    logger.error(f"Failed to create table '{table_name}'")
+                    self.show_status_message(f"Failed to create table {table_name}")
             except Exception as e:
                 logger.error(f"Error creating table: {str(e)}")
-                messagebox.showerror("Error", f"Error: {str(e)}")
+                self.show_status_message(f"Error creating table: {str(e)}")
 
-        ttk.Button(dialog, text="Create", command=create).pack(pady=10)
+        thread = threading.Thread(target=create, daemon=True)
+        thread.start()
 
-    def drop_table_dialog(self):
-        """Show dialog to drop a table."""
+    def drop_current_table(self):
+        """Drop the currently selected table."""
+        if not self.db:
+            self.show_status_message("Not connected to database")
+            return
+
         table_name = self.table_var.get()
-        if messagebox.askyesno("Confirm", f"Drop table '{table_name}'? This cannot be undone."):
-            if self.db.drop_table(table_name):
-                logger.info(f"✓ Dropped table '{table_name}'")
-                messagebox.showinfo("Success", f"Table '{table_name}' dropped successfully")
-                self.load_table_data()
+        if not table_name:
+            self.show_status_message("No table selected")
+            return
+
+        def drop():
+            try:
+                if self.db.drop_table(table_name):
+                    logger.info(f"✓ Dropped table '{table_name}'")
+                    self.show_status_message(f"Table {table_name} dropped successfully")
+                    self.root.after(0, lambda: self.refresh_available_tables(select_first=True))
+                else:
+                    logger.error(f"Failed to drop table '{table_name}'")
+                    self.show_status_message(f"Failed to drop table {table_name}")
+            except Exception as e:
+                logger.error(f"Error dropping table: {str(e)}")
+                self.show_status_message(f"Error dropping table: {str(e)}")
+
+        thread = threading.Thread(target=drop, daemon=True)
+        thread.start()
 
     def export_json(self):
         """Export current table data as JSON."""
         if not self.db:
-            messagebox.showwarning("Warning", "Not connected to database")
+            self.show_status_message("Not connected to database")
             return
 
         table_name = self.table_var.get()
+        if not table_name:
+            self.show_status_message("No table selected")
+            return
 
         def export():
             try:
                 records = self.db.select_all(table_name)
                 json_data = json.dumps(records, indent=2, default=str)
 
-                # Show in new window
-                export_window = tk.Toplevel(self.root)
-                export_window.title(f"Export: {table_name}")
-                export_window.geometry("600x400")
+                # Save to file dialog
+                file_path = filedialog.asksaveasfilename(
+                    defaultextension=".json",
+                    filetypes=[("JSON files", "*.json"), ("Text files", "*.txt")]
+                )
 
-                text_widget = scrolledtext.ScrolledText(export_window, wrap=tk.WORD)
-                text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-                text_widget.insert("1.0", json_data)
-                text_widget.configure(state=tk.DISABLED)
-
-                logger.info(f"✓ Exported {len(records)} records from '{table_name}' to JSON")
+                if file_path:
+                    with open(file_path, 'w') as f:
+                        f.write(json_data)
+                    logger.info(f"✓ Exported {len(records)} records from '{table_name}' to {file_path}")
+                    self.root.after(0, lambda: self.show_status_message(f"Exported {len(records)} records from {table_name} to JSON file"))
+                else:
+                    self.root.after(0, lambda: self.show_status_message("Export cancelled"))
             except Exception as e:
                 logger.error(f"Error exporting data: {str(e)}")
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Error: {str(e)}"))
+                self.root.after(0, lambda: self.show_status_message(f"Error exporting data: {str(e)}"))
 
         thread = threading.Thread(target=export, daemon=True)
         thread.start()
@@ -475,7 +576,6 @@ class PostgreSQLGUI:
 
     def save_logs(self):
         """Save logs to a file."""
-        from tkinter import filedialog
         file_path = filedialog.asksaveasfilename(
             defaultextension=".log",
             filetypes=[("Log files", "*.log"), ("Text files", "*.txt")]
@@ -491,10 +591,10 @@ class PostgreSQLGUI:
                     f.write(logs)
 
                 logger.info(f"✓ Logs saved to '{file_path}'")
-                messagebox.showinfo("Success", "Logs saved successfully")
+                self.show_status_message(f"Logs saved to file successfully")
             except Exception as e:
                 logger.error(f"Error saving logs: {str(e)}")
-                messagebox.showerror("Error", f"Error saving logs: {str(e)}")
+                self.show_status_message(f"Error saving logs: {str(e)}")
 
     def on_closing(self):
         """Handle application closing."""
