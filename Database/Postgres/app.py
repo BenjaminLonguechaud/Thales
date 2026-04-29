@@ -11,7 +11,10 @@ import threading
 import logging
 import json
 import re
+from tkinter import messagebox
 
+from CRDP.CRDP_client import CRDPClient
+from CRDP.config_manager import ConfigManager
 from config import DB_CONFIG
 from postgresql import PostgreSQLDatabase
 
@@ -42,7 +45,7 @@ class LogHandler(logging.Handler):
 class PostgreSQLGUI:
     """Main GUI application for PostgreSQL database operations."""
 
-    def __init__(self, root):
+    def __init__(self, root, config: ConfigManager):
         """Initialize the GUI application."""
         self.root = root
         self.root.title("PostgreSQL Database Manager")
@@ -54,6 +57,12 @@ class PostgreSQLGUI:
         self.table_schema = None
         self.next_table_number = 1  # Track next UsersX number
         self.status_message = ""  # Store status message
+
+        # Initialize CRDP client with configuration
+        self.crdp_client = CRDPClient(config)
+        # Default policies (will be updated from API)
+        self.policy = config.get("crdp.protection_policy", "CRDP_Protection")
+        self.reveal_username = config.get("crdp.reveal_username", "authorizedUser")
 
         # Create the UI
         self.create_widgets()
@@ -144,6 +153,8 @@ class PostgreSQLGUI:
         button_frame = ttk.Frame(parent)
         button_frame.pack(fill=tk.X, pady=10)
 
+        ttk.Button(button_frame, text="Protect and Add Record",
+           command=lambda: self.add_record(protect=True)).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Add Record", command=self.add_record).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Clear Form", command=self.clear_form).pack(side=tk.LEFT, padx=5)
 
@@ -383,12 +394,7 @@ class PostgreSQLGUI:
         """Handle table selection change."""
         self.load_table_data()
 
-    def add_record(self):
-        """Add a new record to the table."""
-        if not self.db:
-            self.show_status_message("Not connected to database")
-            return
-
+    def add_record(self, protect=False):
         # Collect form data
         record = {}
         for field_name, widget in self.form_fields.items():
@@ -398,6 +404,27 @@ class PostgreSQLGUI:
 
         if not record:
             self.show_status_message("Please fill in at least one field")
+            return
+
+        """Protect the SSN field"""
+        if protect:
+            ssn_value = self.form_fields.get("ssn").get()
+            if ssn_value:
+                # Call CRDP protect API
+                try:
+                    protected_data = self.crdp_client.protect(ssn_value, self.policy)
+                    if protected_data and "protected_data" in protected_data:
+                        record["ssn"] = protected_data["protected_data"]
+                        logger.info(f"SSN protected using CRDP: {record["ssn"]}")
+                    else:
+                        logger.error("Failed to protect SSN: No protected data returned")
+                except Exception as e:
+                    logger.error(f"Error protecting SSN: {str(e)}")
+                    self.show_status_message(f"Error protecting SSN: {str(e)}")
+
+        """Add a new record to the table."""
+        if not self.db:
+            self.show_status_message("Not connected to database")
             return
 
         table_name = self.table_var.get()
@@ -461,10 +488,22 @@ class PostgreSQLGUI:
         thread.start()
 
     def on_tree_double_click(self, event):
-        """Handle double-click on tree item to edit."""
-        item = self.tree.selection()
-        if item:
-            self.show_status_message("Edit feature coming soon")
+        # Get selected item
+        selected_item = self.tree.selection()
+        if selected_item:
+            item_id = selected_item[0]
+            values = self.tree.item(item_id, "values")
+
+            protect_ssn_value = values[3]
+            try:
+                revealed_ssn = self.crdp_client.reveal(protect_ssn_value, self.policy, self.reveal_username)
+                if revealed_ssn:
+                    messagebox.showinfo("Revealed SSN", f"Name: {values[1]}\nEmail: {values[2]}\nSSN: {revealed_ssn}")
+                else:
+                    logger.error("Failed to reveal SSN: No revealed data returned")
+            except Exception as e:
+                logger.error(f"Error revealing SSN: {str(e)}")
+                self.show_status_message(f"Error revealing SSN: {str(e)}")
 
     def clear_form(self):
         """Clear all form fields."""
@@ -485,7 +524,7 @@ class PostgreSQLGUI:
             "id": "SERIAL PRIMARY KEY",
             "name": "VARCHAR(255)",
             "email": "VARCHAR(255)",
-            "ssn": "VARCHAR(11)"
+            "ssn": "VARCHAR(255)"
         }
 
         def create():
@@ -606,8 +645,11 @@ class PostgreSQLGUI:
 
 def main():
     """Main entry point."""
+    # Load configuration
+    config = ConfigManager()
+
     root = tk.Tk()
-    app = PostgreSQLGUI(root)
+    app = PostgreSQLGUI(root, config)
     root.mainloop()
 
 
